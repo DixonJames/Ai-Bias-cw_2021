@@ -467,10 +467,10 @@ class DataSplit:
             data = self.wholedf
 
         rows = data.count()[0]
-        x_train = data[: round(self.split * rows)].drop(columns = ['credit_decision', 'credit decision'])
+        x_train = data[: round(self.split * rows)].drop(columns = ['credit_decision'])
         y_train = self.target[: round(self.split * rows)]
 
-        x_test = data[round(self.split * rows):].drop(columns = ['credit_decision', 'credit decision'])
+        x_test = data[round(self.split * rows):].drop(columns = ['credit_decision'])
         y_test = self.target[round(self.split * rows):]
         if validation:
             test_rows = x_test.count()[0]
@@ -567,7 +567,7 @@ class Models:
 
 
 
-        model = SVC()
+        model = SVC(probability=True)
 
         SVR_pred = GridSearchCV(model, parameters, n_jobs=-1, return_train_score=True, cv=5)
 
@@ -620,6 +620,31 @@ class Repair:
         if vals_len % 2 ==0:
             return vals[int((vals_len/2) -1)]
         return vals[int(vals_len / 2)]
+
+    def CND(self, wholeDF, protected_cols, benefitedGroups, marginalisedGroups):
+        """
+        classification with no discrimination
+        [4] Faisal Kamiran and Toon Calders. Classifying Without Discriminating. In Classifying Without Discriminating. Computer, Control and Communication, 2010.
+        :return:
+        """
+        #creates the DF with probabilities for calssification
+        wholeDF_with_prob = wholeDF.copy()
+        model_training = Models(wholeDF)
+
+        svmModel = model_training.svmModel.best_estimator_
+        bias_preprocessing = DataSplit(formatData(), 0.7)
+        x_train, y_train, x_test, y_test = bias_preprocessing.naieveSplit()
+        x_all = x_train.append(x_test)
+
+        target_probs = pd.DataFrame(svmModel.predict_proba(wholeDF.drop(columns=["credit_decision"])), columns=["prob_credit_1", "prob_credit_2"])
+        wholeDF_with_prob["prob_credit_1", "prob_credit_2"] = target_probs["prob_credit_1", "prob_credit_2"]
+
+        #goes though each of the gategories and applies CND
+
+
+
+
+
 
     def repair(self, wholeDF, target_cols, protected_cols, lambda_const):
         wholeDF = wholeDF.sample(len(wholeDF)).reset_index().drop(columns = ['index'], axis = 1)
@@ -698,6 +723,9 @@ class Repair:
 
         repairedDF = wholeDF.copy()
         all_scores = list(wholeDF["credit_decision"].values.copy())
+        ordered_unique_targets = list(wholeDF["credit_decision"].unique())
+        ordered_unique_targets.sort()
+
         for q_n in range(smallest_g):
 
             quantile_target = quantile_targets[q_n]
@@ -707,10 +735,10 @@ class Repair:
             for id in range(len(quantile_indexList)):
                 original_value = quantile_df[target_label].values[id]
                 origainl_index = quantile_df["index"].values[id]
-                distance = quantile_target - original_value
 
-                if distance == 0:
-                    distance = 1
+                originals_index_uniqueTargets = ordered_unique_targets.index(original_value)
+                targets_index_uniqueTargets = ordered_unique_targets.index(quantile_target)
+                distance = targets_index_uniqueTargets - originals_index_uniqueTargets
 
                 repair_distance = round(distance * lambda_const)
 
@@ -789,8 +817,8 @@ if __name__ == '__main__':
 
     df = formatData()
 
-
-    repaired_df = Repair().repair(df, ['credit_decision'], ["Age_cat", "sex"], 5)
+    CND_df = Repair().CND(df, ["Age_cat", "sex"], [], [])
+    repaired_df = Repair().repair(df, ['credit_decision'], ["Age_cat", "sex"], 0.5)
 
     eqilised_outcome_sex_df, equilised_sex_df = fairSexDF()
     eqilised_outcome_age_df, equilised_age_df = fairAgeDF()
