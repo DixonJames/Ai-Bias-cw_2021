@@ -7,6 +7,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pickle
+import functools
 import math
 import re
 import os
@@ -341,19 +343,39 @@ class AnalyseData:
 
         # how predicted values changed with age
         ageComparison = pd.DataFrame()
-        ageComparison["true-val-accept"] = (self.df[self.df["true-val"] == "1"]["Age"] * 75).describe()
-        ageComparison["SVM-pred-accept"] = (self.df[self.df["SVM-predict-val"] == "1"]["Age"] * 75).describe()
-        ageComparison["RF-pred-accept"] = (self.df[self.df["RF-predict-val"] == "1"]["Age"] * 75).describe()
+        self.df['Age_cat'] = self.df['Age_cat'].astype("string")
 
-        ageComparison["true-val-reject"] = (self.df[self.df["true-val"] == "2"]["Age"] * 75).describe()
-        ageComparison["SVM-pred-reject"] = (self.df[self.df["SVM-predict-val"] == "2"]["Age"] * 75).describe()
-        ageComparison["RF-pred-reject"] = (self.df[self.df["RF-predict-val"] == "2"]["Age"] * 75).describe()
+        numYoung = len(self.df.loc[self.df['Age_cat'] == '1.0'])
+        numOld = len(self.df.loc[self.df['Age_cat'] == '2.0'])
 
-        ageComparison = (ageComparison.T).drop(["25%", "50%", "75%"], axis=1).T
+        trueOldLoans = len(self.df.loc[self.df['Age_cat'] == '2.0'].loc[self.df["true-val"] == 1.0])
+        trueyoungLoans = len(self.df.loc[self.df['Age_cat'] == '1.0'].loc[self.df["true-val"] == 1.0])
+
+        SvmOldLoans = len(self.df.loc[self.df['Age_cat'] == '2.0'].loc[self.df["SVM-predict-val"] == 1.0])
+        SvmYoungLoans = len(self.df.loc[self.df['Age_cat'] == '1.0'].loc[self.df["SVM-predict-val"] == 1.0])
+
+        RfOldLoans = len(self.df.loc[self.df['Age_cat'] == '2.0'].loc[self.df["RF-predict-val"] == 1.0])
+        RfYoungLoans = len(self.df.loc[self.df['Age_cat'] == '1.0'].loc[self.df["RF-predict-val"] == 1.0])
+
+        ageComparison["number of loans given in Dataset"] = pd.Series(
+            [100 * trueOldLoans / numOld, 100 * trueyoungLoans / numYoung])
+        ageComparison["SVM predicted loans given"] = pd.Series(
+            [100 * SvmOldLoans / numOld, 100 * SvmYoungLoans / numYoung])
+        ageComparison["RF predicted loans given"] = pd.Series(
+            [100 * RfOldLoans / numOld, 100 * RfYoungLoans / numYoung])
+        ageComparison.T.columns = ['Old', 'Young']
+
+        ageComparison.rename(index={0: 'Old', 1: 'Young'}, inplace=True)
+
         self.printReportGraphStyle(ageComparison)
 
-        # how predicted values changed with sex
 
+
+
+
+
+        # how predicted values changed with sex
+        """
         sexComparison = pd.DataFrame()
         self.df['sex_cat'] = self.df['sex'].astype("string")
 
@@ -401,6 +423,7 @@ class AnalyseData:
                      ax=axis[1, 2]).set_title("RF prediction rejection")
 
         # plt.show()
+        """
 
 
 class FeatureAnalysis:
@@ -462,7 +485,7 @@ class DataSplit:
 
         self.split = split
 
-    def naieveSplit(self, validation=False, input_df=None):
+    def naieveSplit(self, validation=False, input_df=None, train=True):
         try:
             if input_df.all != None:
                 data = input_df
@@ -485,7 +508,8 @@ class DataSplit:
 
             return x_train, y_train, x_test, y_test, x_validation, y_validation
 
-        return x_train, y_train, x_test, y_test
+        if train == True:
+            return x_train, y_train, x_test, y_test
 
     def demographicParitySplit(self, feature):
         """
@@ -543,12 +567,16 @@ class DataSplit:
 
 class Models:
 
-    def __init__(self, df):
+    def __init__(self, df, trainAll=False):
         self.df = df
 
         # creating data sets
         dataset_creation = DataSplit(whole_df=self.df, split=0.7)
+
         self.x_train, self.y_train, self.x_test, self.y_test = dataset_creation.naieveSplit(input_df=self.df)
+        if trainAll:
+            self.x_train = self.df.drop(columns=["credit_decision"])
+            self.y_train = self.df["credit_decision"]
 
         f_scale = StandardScaler()
 
@@ -689,7 +717,7 @@ class Repair:
                                         wholeDF_with_prob[target_col] == target_grant])
 
             num_swaps = round(((num_marginalised * num_benefited_pos) - (num_benefited * num_marginalised_pos)) / (
-                        num_benefited + num_marginalised))
+                    num_benefited + num_marginalised))
 
             KCDM_score = self.KCDM(repaired_df, col, marginalised_group, benefited_group, target_col, target_grant)
             swap_i = 0
@@ -806,15 +834,24 @@ class Repair:
                 targets_index_uniqueTargets = ordered_unique_targets.index(quantile_target)
                 distance = targets_index_uniqueTargets - originals_index_uniqueTargets
 
-                repair_distance = round(distance * lambda_const)
+                direction = quantile_target - original_value
+                # first_group_start
+                # second_groupStart
 
-                index_repair_value = max(0, min(id + repair_distance, len(quantile_df['Age']) - 1))
-                repair_value = quantile_df[target_label].values[index_repair_value]
+                repair_distance = round((round(len(quantile_df) / 2) - id) * lambda_const)
+
+                index_repair_value = max(0, min(id + repair_distance, len(quantile_df) - 1))
+                # combinatorial
+                # repair_value = quantile_df[target_label].values[index_repair_value]
+
+                repair_value = float(quantile_df[target_label].values[index_repair_value])
 
                 if repair_value != original_value:
                     all_scores[origainl_index] = repair_value
 
         repairedDF["credit_decision"] = all_scores
+
+        repairedDF = repairedDF.drop(columns=stratified_cols, axis=1)
 
         return repairedDF
 
@@ -856,10 +893,8 @@ def fairAgeDF():
 def modelDataGeneralise(dataframe):
     model_training = Models(dataframe)
 
-
     svmModel = model_training.svmModel.best_estimator_
     RFmodel = model_training.rfModel.best_estimator_
-
 
     # feature correlation
     featureworkspace = FeatureAnalysis(df, df[target_label])
@@ -888,63 +923,334 @@ def modelDataGeneralise(dataframe):
 
     AnalyseData(total_feature_importance).printReportGraphStyle(total_feature_importance)
 
+
 def simpleGroupEquilisation(df):
+    eqilised_outcome_sex_df, equilised_sex_df = fairSexDF()
+    eqilised_outcome_age_df, equilised_age_df = fairAgeDF()
 
-        eqilised_outcome_sex_df, equilised_sex_df = fairSexDF()
-        eqilised_outcome_age_df, equilised_age_df = fairAgeDF()
+    equilisedModels = []
 
-        equilisedModels = []
+    print("========age============")
+    for dataframe in [df, eqilised_outcome_age_df, equilised_age_df]:
+        # unbiaes data record reweighting
+        bias_preprocessing = DataSplit(dataframe, 0.7)
 
-        print("========sex============")
-        for dataframe in [df, eqilised_outcome_sex_df, equilised_sex_df]:
-            # unbiaes data record reweighting
-            bias_preprocessing = DataSplit(dataframe, 0.7)
+        # training data
+        model_training = Models(dataframe)
+        predctionDF = model_training.predictionOutput()
 
-            # training data
-            model_training = Models(dataframe)
-            predctionDF = model_training.predictionOutput()
+        svmModel = model_training.svmModel.best_estimator_
+        RFmodel = model_training.rfModel.best_estimator_
 
-            svmModel = model_training.svmModel.best_estimator_
-            RFmodel = model_training.rfModel.best_estimator_
+        equilisedModels.append((svmModel, RFmodel))
 
-            equilisedModels.append((svmModel, RFmodel))
+        outputAnalysis = AnalyseData(predctionDF)
+        outputAnalysis.prediction_Comparison()
 
-            outputAnalysis = AnalyseData(predctionDF)
-            # outputAnalysis.prediction_Comparison()
+    print("========sex============")
+    for dataframe in [df, eqilised_outcome_sex_df, equilised_sex_df]:
+        # unbiaes data record reweighting
+        bias_preprocessing = DataSplit(dataframe, 0.7)
 
-        print("========age============")
-        for dataframe in [eqilised_outcome_age_df, equilised_age_df]:
-            # unbiaes data record reweighting
-            bias_preprocessing = DataSplit(dataframe, 0.7)
+        # training data
+        model_training = Models(dataframe)
+        predctionDF = model_training.predictionOutput()
 
-            # training data
-            model_training = Models(dataframe)
-            predctionDF = model_training.predictionOutput()
+        svmModel = model_training.svmModel.best_estimator_
+        RFmodel = model_training.rfModel.best_estimator_
 
-            svmModel = model_training.svmModel.best_estimator_
-            RFmodel = model_training.rfModel.best_estimator_
+        equilisedModels.append((svmModel, RFmodel))
 
-            equilisedModels.append((svmModel, RFmodel))
+        outputAnalysis = AnalyseData(predctionDF)
+        # outputAnalysis.prediction_Comparison()
 
-            outputAnalysis = AnalyseData(predctionDF)
-            # outputAnalysis.prediction_Comparison()
 
-        bias_preprocessing = DataSplit(formatData(), 0.7)
-        x_train, y_train, x_test, y_test = bias_preprocessing.naieveSplit()
-        model_acc = {"naive": [accuracy_score(y_test, equilisedModels[0][0].predict(x_test)),
-                               accuracy_score(y_test, equilisedModels[0][1].predict(x_test))],
-                     "eqilised outcome sex": [accuracy_score(y_test, equilisedModels[1][0].predict(x_test)),
-                                              accuracy_score(y_test, equilisedModels[1][1].predict(x_test))],
-                     "equilised sex": [accuracy_score(y_test, equilisedModels[2][0].predict(x_test)),
-                                       accuracy_score(y_test, equilisedModels[2][1].predict(x_test))],
-                     "eqilised outcome age": [accuracy_score(y_test, equilisedModels[3][0].predict(x_test)),
-                                              accuracy_score(y_test, equilisedModels[3][1].predict(x_test))],
-                     "equilised age": [accuracy_score(y_test, equilisedModels[4][0].predict(x_test)),
-                                       accuracy_score(y_test, equilisedModels[4][1].predict(x_test))]}
+
+    bias_preprocessing = DataSplit(formatData(), 0.7)
+    x_train, y_train, x_test, y_test = bias_preprocessing.naieveSplit()
+    model_acc = {"naive": [accuracy_score(y_test, equilisedModels[0][0].predict(x_test)),
+                           accuracy_score(y_test, equilisedModels[0][1].predict(x_test))],
+                 "eqilised outcome sex": [accuracy_score(y_test, equilisedModels[1][0].predict(x_test)),
+                                          accuracy_score(y_test, equilisedModels[1][1].predict(x_test))],
+                 "equilised sex": [accuracy_score(y_test, equilisedModels[2][0].predict(x_test)),
+                                   accuracy_score(y_test, equilisedModels[2][1].predict(x_test))],
+                 "eqilised outcome age": [accuracy_score(y_test, equilisedModels[3][0].predict(x_test)),
+                                          accuracy_score(y_test, equilisedModels[3][1].predict(x_test))],
+                 "equilised age": [accuracy_score(y_test, equilisedModels[4][0].predict(x_test)),
+                                   accuracy_score(y_test, equilisedModels[4][1].predict(x_test))]}
+
+
+def inicailDSAnalysis():
+    # column reports for creating latex graphs
+    dataAnalysis = AnalyseData(getData())
+    dataAnalysis.dataframeSubSet()
+
+    reports = dataAnalysis.runReports()
+    for r in reports:
+        dataAnalysis.printReportGraphStyle(r)
+
+    # analyses bias in dataset
+    df = formatData()
+    dataAnalysis = AnalyseData(df)
+    dataAnalysis.dataframeSubSet()
+
+
+def CNDExperiment():
+    target_label = 'credit_decision'
+    wholedf = formatData()
+
+    x_train, y_train, x_test, y_test = DataSplit(wholedf, 0.7).naieveSplit()
+    x_train["credit_decision"] = y_train
+
+    augmenting_df = x_train
+    testing_df = x_test
+
+    cnd_test_values = [i / 1000 for i in range(1, 100)]
+    cnd_test_results = {}
+    for cnd_val in cnd_test_values:
+        results = {}
+        CND_df = Repair().CND(augmenting_df, 'credit_decision', ["Age_cat", "sex"], [2.0, 1], [1.0, 2], cnd_val)
+
+        model_training = Models(CND_df, trainAll=True)
+
+        svmModel = SVC(probability=True, kernel="linear", degree=6, gamma="scale", C=0.146).fit(
+            CND_df.drop(columns=[target_label]), y=CND_df[target_label])
+        RFmodel = RandomForestClassifier(n_jobs=-1, n_estimators=74, criterion="entropy").fit(
+            CND_df.drop(columns=[target_label]), y=CND_df[target_label])
+
+        svmPredictions = svmModel.predict(testing_df)
+        rfPredictions = RFmodel.predict(testing_df)
+
+        # now compare the results
+
+        svmComparisonDF = pd.DataFrame()
+        svmComparisonDF['y_Actual'] = y_test
+        svmComparisonDF['y_Predicted'] = svmPredictions
+
+        rfComparisonDF = pd.DataFrame()
+        rfComparisonDF['y_Actual'] = y_test
+        rfComparisonDF['y_Predicted'] = rfPredictions
+
+        svmConfMat = pd.crosstab(svmComparisonDF['y_Actual'], svmComparisonDF['y_Predicted'], rownames=['Actual'],
+                                 colnames=['Predicted'])
+        rfConfMat = pd.crosstab(rfComparisonDF['y_Actual'], rfComparisonDF['y_Predicted'], rownames=['Actual'],
+                                colnames=['Predicted'])
+
+        svm_TP = svmConfMat[1.0].values[0]
+        svm_TN = svmConfMat[2.0].values[1]
+        svm_FP = svmConfMat[1.0].values[1]
+        svm_FN = svmConfMat[2.0].values[0]
+        svm_utility_score = 1 - ((svm_FN / (svm_FN + svm_TP)) + (svm_FP / (svm_FP + svm_TN))) / 2
+        svm_acc_score = (svm_TP + svm_TN) / (svm_FN + svm_TP + svm_FP + svm_TN)
+
+        rf_TP = rfConfMat[1.0].values[0]
+        rf_TN = rfConfMat[2.0].values[1]
+        rf_FP = rfConfMat[1.0].values[1]
+        rf_FN = rfConfMat[2.0].values[0]
+        rf_utility_score = 1 - ((rf_FN / (rf_FN + rf_TP)) + (rf_FP / (rf_FP + rf_TN))) / 2
+        rf_acc_score = (rf_TP + rf_TN) / (rf_FN + rf_TP + rf_FP + rf_TN)
+
+
+        results["max_KCDM_df_score"] = cnd_val
+        results["svm_acc"] = svm_acc_score
+        results["svm_util"] = svm_utility_score
+
+        results["rf_acc"] = rf_acc_score
+        results["rf_util"] = rf_utility_score
+
+        # results["svm_confMat"] = svmConfMat
+        # results["rf_confMat"] = rfConfMat
+
+        cnd_test_results[f"{cnd_val}"] = results
+    return cnd_test_results
+
+
+def repairExperiment():
+    target_label = 'credit_decision'
+    wholedf = formatData()
+
+    x_train, y_train, x_test, y_test = DataSplit(wholedf, 0.7).naieveSplit()
+    x_train["credit_decision"] = y_train
+
+    augmenting_df = x_train
+    testing_df = x_test
+
+    lambda_vlaues = [i / 10 for i in range(1, 100)]
+    repair_test_results = {}
+
+    for lam_val in lambda_vlaues:
+        results = {}
+        CND_df = Repair().repair(augmenting_df, ['credit_decision'], ["Age_cat", "sex"], lam_val)
+
+        svmModel = SVC(probability=True, kernel="linear", degree=6, gamma="scale", C=0.146).fit(
+            CND_df.drop(columns=[target_label]), y=CND_df[target_label])
+        RFmodel = RandomForestClassifier(n_jobs=-1, n_estimators=74, criterion="entropy").fit(
+            CND_df.drop(columns=[target_label]), y=CND_df[target_label])
+
+        svmPredictions = svmModel.predict(testing_df)
+        rfPredictions = RFmodel.predict(testing_df)
+
+        # now compare the results
+
+        svmComparisonDF = pd.DataFrame()
+        svmComparisonDF['y_Actual'] = y_test
+        svmComparisonDF['y_Predicted'] = svmPredictions
+
+        rfComparisonDF = pd.DataFrame()
+        rfComparisonDF['y_Actual'] = y_test
+        rfComparisonDF['y_Predicted'] = rfPredictions
+
+        svmConfMat = pd.crosstab(svmComparisonDF['y_Actual'], svmComparisonDF['y_Predicted'], rownames=['Actual'],
+                                 colnames=['Predicted'])
+        rfConfMat = pd.crosstab(rfComparisonDF['y_Actual'], rfComparisonDF['y_Predicted'], rownames=['Actual'],
+                                colnames=['Predicted'])
+
+        try:
+            svmConfMat[2.0]
+        except:
+            svmConfMat[2.0] = [0, 0]
+        try:
+            svmConfMat[1.0]
+        except:
+            svmConfMat[1.0] = [0, 0]
+
+        try:
+            rfConfMat[2.0]
+        except:
+            rfConfMat[2.0] = [0, 0]
+        try:
+            rfConfMat[1.0]
+        except:
+            rfConfMat[1.0] = [0, 0]
+
+        try:
+            svm_TP = svmConfMat[1.0].values[0]
+            svm_TN = svmConfMat[2.0].values[1]
+            svm_FP = svmConfMat[1.0].values[1]
+            svm_FN = svmConfMat[2.0].values[0]
+        except:
+            print(" d")
+        svm_utility_score = 1 - ((svm_FN / (svm_FN + svm_TP)) + (svm_FP / (svm_FP + svm_TN))) / 2
+        svm_acc_score = (svm_TP + svm_TN) / (svm_FN + svm_TP + svm_FP + svm_TN)
+
+        rf_TP = rfConfMat[1.0].values[0]
+        rf_TN = rfConfMat[2.0].values[1]
+        rf_FP = rfConfMat[1.0].values[1]
+        rf_FN = rfConfMat[2.0].values[0]
+        rf_utility_score = 1 - ((rf_FN / (rf_FN + rf_TP)) + (rf_FP / (rf_FP + rf_TN))) / 2
+        rf_acc_score = (rf_TP + rf_TN) / (rf_FN + rf_TP + rf_FP + rf_TN)
+
+        test_result_df = x_test.copy()
+        test_result_df["true_credit_decision"] = y_test
+        test_result_df["svm_credit_decision"] = svmPredictions
+        test_result_df["rf_credit_decision"] = rfPredictions
+
+        results["lambda_value"] = lam_val
+        results["svm_acc"] = svm_acc_score
+        results["svm_util"] = svm_utility_score
+        # results["svm_age_legal_desperate_Impact"] = ((len(test_result_df.loc[test_result_df["Age_cat"] == 1.0].loc[test_result_df["svm_credit_decision"] == 1.0])/len(test_result_df.loc[test_result_df["Age_cat"] == 1.0]))*100 / (len(test_result_df.loc[test_result_df["Age_cat"] == 2.0].loc[test_result_df["svm_credit_decision"] == 1.0])/ len(test_result_df.loc[test_result_df["Age_cat"] == 2.0]))*100)/100
+        # results["svm_sex_legal_desperate_Impact"] = (len(test_result_df.loc[test_result_df["sex"] == 1].loc[test_result_df["svm_credit_decision"] == 2]) / len(test_result_df.loc[test_result_df["sex"] == 1])*100 / (len(test_result_df.loc[test_result_df["sex"] == 1].loc[test_result_df["svm_credit_decision"] == 1.0])/len(test_result_df.loc[test_result_df["sex"] == 1]))*100)/100
+
+        results["rf_acc"] = rf_acc_score
+        results["rf_util"] = rf_utility_score
+        # results["rf_age_legal_desperate_Impact"] = ((len(test_result_df.loc[test_result_df["Age_cat"] == 1.0].loc[test_result_df["rf_credit_decision"] == 1.0])/len(test_result_df.loc[test_result_df["Age_cat"] == 1.0]))*100 / (len(test_result_df.loc[test_result_df["Age_cat"] == 2.0].loc[test_result_df["rf_credit_decision"] == 1.0])/ len(test_result_df.loc[test_result_df["Age_cat"] == 2.0]))*100)/100
+        # results["rf_sex_legal_desperate_Impact"] = (len(test_result_df.loc[test_result_df["sex"] == 1].loc[test_result_df["rf_credit_decision"] == 2]) / len(test_result_df.loc[test_result_df["sex"] == 1])*100 / (len(test_result_df.loc[test_result_df["sex"] == 1].loc[test_result_df["rf_credit_decision"] == 1.0])/len(test_result_df.loc[test_result_df["sex"] == 1]))*100)/100
+
+        # results["svm_confMat"] = svmConfMat
+        # results["rf_confMat"] = rfConfMat
+
+        repair_test_results[f"{lam_val}"] = results
+    return repair_test_results
+
+
+def resultsGraph(repair_results, CNDresults):
+    """
+    test_result_df = x_test.copy()
+        test_result_df["true_credit_decision"] = y_test
+        test_result_df["svm_credit_decision"] = svmPredictions
+        test_result_df["rf_credit_decision"] = rfPredictions
+
+        results["lambda_value"] = lam_val
+        results["svm_acc"] = svm_acc_score
+        results["svm_util"] = svm_utility_score
+
+        results["rf_acc"] = rf_acc_score
+        results["rf_util"] = rf_utility_score
+    :param repair_results:
+    :param CNDresults:
+    :return:
+    """
+    repair_results["SVM accuracy score"] = repair_results["svm_acc"]
+    repair_results["SVM utility score"] = repair_results["svm_util"]
+    repair_results["RF accuracy score"] = repair_results["rf_acc"]
+    repair_results["RF utility score"] = repair_results["rf_util"]
+
+    sns.set(style="darkgrid")
+    figure, axis = plt.subplots(2, 2, figsize=(7, 7))
+
+    sns.lineplot(data=repair_results, x="lambda_value", y="SVM accuracy score", color="red", ax=axis[0, 0])
+    sns.lineplot(data=repair_results, x="lambda_value", y="SVM utility score", color="green",
+                 ax=axis[0, 1])
+    sns.lineplot(data=repair_results, x="lambda_value", y="RF accuracy score", color="blue",
+                 ax=axis[1, 0])
+    sns.lineplot(data=repair_results, x="lambda_value", y="RF utility score", color="yellow",
+                 ax=axis[1, 1])
+
+    plt.show()
+
+
+
+    CNDresults["SVM accuracy score"] = CNDresults["svm_acc"]
+    CNDresults["SVM utility score"] = CNDresults["svm_util"]
+    CNDresults["RF accuracy score"] = CNDresults["rf_acc"]
+    CNDresults["RF utility score"] = CNDresults["rf_util"]
+
+    sns.set(style="darkgrid")
+    figure, axis = plt.subplots(2, 2, figsize=(7, 7))
+
+    sns.lineplot(data=CNDresults, x="max_KCDM_df_score", y="SVM accuracy score", color="red", ax=axis[0, 0])
+    sns.lineplot(data=CNDresults, x="max_KCDM_df_score", y="SVM utility score", color="green",
+                 ax=axis[0, 1])
+    sns.lineplot(data=CNDresults, x="max_KCDM_df_score", y="RF accuracy score", color="blue",
+                 ax=axis[1, 0])
+    sns.lineplot(data=CNDresults, x="max_KCDM_df_score", y="RF utility score", color="yellow",
+                 ax=axis[1, 1])
+
+    #plt.show()
+
+
+
+
+
+
+def runExperiments():
+    target_label = 'credit_decision'
+    """
+    repair_results = repairExperiment()
+    CNDresults = CNDExperiment()
+
+
+    file_pi = open('repair_results.obj', 'wb')
+    pickle.dump(repair_results, file_pi)
+
+    file_pi = open('CNDresults.obj', 'wb')
+    pickle.dump(CNDresults, file_pi)
+    """
+    filehandler = open("CNDresults.obj", 'rb')
+    CNDresults = pd.DataFrame(pickle.load(filehandler)).T
+
+    filehandler = open("repair_results.obj", 'rb')
+    repair_results = pd.DataFrame(pickle.load(filehandler)).T
+
+    resultsGraph(repair_results, CNDresults)
+
 
 if __name__ == '__main__':
-
     target_label = 'credit_decision'
+    #runExperiments()
+
+
+
     """ column reports for creating latex graphs
     dataAnalysis = AnalyseData(getData())
     dataAnalysis.dataframeSubSet()
@@ -969,12 +1275,10 @@ if __name__ == '__main__':
     eqilised_outcome_sex_df, equilised_sex_df = fairSexDF()
     eqilised_outcome_age_df, equilised_age_df = fairAgeDF()
 
-    """HOWMODELS GENERALISED TO DATASET
-    modelDataGeneralise(df)
-    """
+    #"""HOWMODELS GENERALISED TO DATASET
+    #modelDataGeneralise(df)
+    #"""
 
-    """ equilisng subgroups to try and balance DF
+    #""" equilisng subgroups to try and balance DF
     simpleGroupEquilisation(df)
-    """
-
-
+    #"""
