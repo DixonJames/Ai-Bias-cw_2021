@@ -375,21 +375,21 @@ class AnalyseData:
 
 
         # how predicted values changed with sex
-        """
+
         sexComparison = pd.DataFrame()
         self.df['sex_cat'] = self.df['sex'].astype("string")
 
         numMales = len(self.df.loc[self.df['sex_cat'] == '1'])
         numFemales = len(self.df.loc[self.df['sex_cat'] == '2'])
 
-        trueMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["true-val"] == '1'])
-        trueFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["true-val"] == '1'])
+        trueMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["true-val"] == 1.0])
+        trueFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["true-val"] == 1.0])
 
-        SvmMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["SVM-predict-val"] == '1'])
-        SvmFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["SVM-predict-val"] == '1'])
+        SvmMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["SVM-predict-val"] == 1.0])
+        SvmFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["SVM-predict-val"] == 1.0])
 
-        RfMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["RF-predict-val"] == '1'])
-        RfFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["RF-predict-val"] == '1'])
+        RfMaleLoans = len(self.df.loc[self.df['sex_cat'] == '1'].loc[self.df["RF-predict-val"] == 1.0])
+        RfFemaleLoans = len(self.df.loc[self.df['sex_cat'] == '2'].loc[self.df["RF-predict-val"] == 1.0])
 
         sexComparison["number of loans given in Dataset"] = pd.Series(
             [100 * trueMaleLoans / numMales, 100 * trueFemaleLoans / numFemales])
@@ -404,7 +404,7 @@ class AnalyseData:
         self.printReportGraphStyle(sexComparison)
 
         # hostogram of prediced values
-
+        """
         sns.set(style="darkgrid")
         figure, axis = plt.subplots(2, 3, figsize=(7, 7))
 
@@ -423,8 +423,8 @@ class AnalyseData:
                      ax=axis[1, 2]).set_title("RF prediction rejection")
 
         # plt.show()
+    
         """
-
 
 class FeatureAnalysis:
     def __init__(self, df, label):
@@ -518,20 +518,24 @@ class DataSplit:
         categories = list(self.wholedf[feature].unique())
         target_categories = list(self.target.unique())
         minLength = len(self.wholedf)
-        for category in categories:
-            for target_cat in target_categories:
-                if minLength > len(self.wholedf.loc[self.wholedf[feature] == category].loc[
-                                       self.wholedf[self.targetLabel] == target_cat]):
-                    minLength = len(self.wholedf.loc[self.wholedf[feature] == category].loc[
-                                        self.wholedf[self.targetLabel] == target_cat])
-
         new_equilised_df = (self.wholedf.loc[self.wholedf[feature] == -999])
+        category_len_dict = {}
+        for category in categories:
+            cat_minLength = len(self.wholedf)
+            for target_cat in target_categories:
+                if cat_minLength > len(self.wholedf.loc[self.wholedf[feature] == category].loc[
+                                       self.wholedf[self.targetLabel] == target_cat]):
+                    cat_minLength = len(self.wholedf.loc[self.wholedf[feature] == category].loc[
+                                        self.wholedf[self.targetLabel] == target_cat])
+            category_len_dict[category] = cat_minLength
+
+
         frames = []
         for category in categories:
             for target_cat in target_categories:
                 wholeSample = self.wholedf.loc[self.wholedf[feature] == category].loc[
                     self.wholedf[self.targetLabel] == target_cat]
-                frames.append((wholeSample).sample(frac=minLength / len(wholeSample), random_state=2))
+                frames.append((wholeSample).sample(frac=category_len_dict[category] / len(wholeSample), random_state=2))
 
         new_equilised_df = pd.concat(frames).sample(frac=1).reset_index()
 
@@ -944,8 +948,8 @@ def simpleGroupEquilisation(df):
 
         equilisedModels.append((svmModel, RFmodel))
 
-        outputAnalysis = AnalyseData(predctionDF)
-        outputAnalysis.prediction_Comparison()
+        #outputAnalysis = AnalyseData(predctionDF)
+        #outputAnalysis.prediction_Comparison()
 
     print("========sex============")
     for dataframe in [df, eqilised_outcome_sex_df, equilised_sex_df]:
@@ -962,7 +966,7 @@ def simpleGroupEquilisation(df):
         equilisedModels.append((svmModel, RFmodel))
 
         outputAnalysis = AnalyseData(predctionDF)
-        # outputAnalysis.prediction_Comparison()
+        outputAnalysis.prediction_Comparison()
 
 
 
@@ -1268,6 +1272,7 @@ if __name__ == '__main__':
     """
 
     df = formatData()
+    simpleGroupEquilisation(df)
 
     CND_df = Repair().CND(df, 'credit_decision', ["Age_cat", "sex"], [2.0, 1], [1.0, 2], 0.001)
     repaired_df = Repair().repair(df, ['credit_decision'], ["Age_cat", "sex"], 0.5)
